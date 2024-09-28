@@ -1,9 +1,7 @@
-// Главный вопрос - как работают фильтры на 57 - 63 строках и на 97 - 117
-
 int spectr[FFT_SIZE];
 float averK = 0.006;
-int lowPassSpectr = 0;
-int lowPassVolume = 0;
+int lowPassSpectr = 40;
+int lowPassVolume = 100;
 
 bool colorMusicFlash[3];
 bool running_flag[3];
@@ -12,11 +10,21 @@ int freq_min[32];
 float freq_max_f;
 float colorMusic_f[3], colorMusic_aver[3];
 
+void computeSound() {
+  if (mode == 0) 
+    filterVolume();
+
+  else {
+    ADC_FFT();
+    filterFFT();
+  }
+}
+
 void ADC_FFT() {
   int raw[FFT_SIZE];
 
   for (int i = 0; i < FFT_SIZE; i++) 
-    raw[i] = analogRead(SOUND_R);
+    raw[i] = analogRead(soundRList[portAux]);
 
   FFT(raw, spectr);
 } 
@@ -74,7 +82,6 @@ void filterFFT() {
   }
 }
 
-
 float averageLevel = 50;
 int maxLevel = 100;
 int Rlenght, Llenght;
@@ -83,11 +90,11 @@ int RcurrentLevel, LcurrentLevel;
 
 void filterVolume() {
   #define MAX_COEF 1.8
-  int MAX_CH = NUM_LEDS / 2;
+  int HALF_LED = NUM_LEDS / 2;
   float RsoundLevel = 0, LsoundLevel = 0;
 
   for (byte i = 0; i < 100; i ++) { //100 измерений для большей точности                     
-    RcurrentLevel = analogRead(SOUND_R);
+    RcurrentLevel = analogRead(soundRList[portAux]);
     if (RsoundLevel < RcurrentLevel) //ищем максимум
       RsoundLevel = RcurrentLevel;
   }
@@ -95,7 +102,7 @@ void filterVolume() {
   RsoundLevel = map(RsoundLevel, lowPassVolume, 1023, 0, 500); //ограничение по диапазону 0 - 500
   RsoundLevel = constrain(RsoundLevel, 0, 500); //предотвращение выхода за диапазон
   RsoundLevel = pow(RsoundLevel, EXP); //возведение в степень 
-  RsoundLevel_f = RsoundLevel * VolumeSmooth + RsoundLevel_f * (1 - VolumeSmooth);
+  RsoundLevel_f = RsoundLevel * volumeSmooth + RsoundLevel_f * (1 - volumeSmooth);
   LsoundLevel_f = RsoundLevel_f;
 
   if (emptyBright > 5) {
@@ -106,10 +113,32 @@ void filterVolume() {
   if (RsoundLevel_f > 15 && LsoundLevel_f > 15) {
     averageLevel = (float)(RsoundLevel_f + LsoundLevel_f) / 2 * averK + averageLevel * (1 - averK);
     maxLevel = (float)averageLevel * MAX_COEF;
-    Rlenght = map(RsoundLevel_f, 0, maxLevel, 0, MAX_CH);
-    Llenght = map(LsoundLevel_f, 0, maxLevel, 0, MAX_CH);
+    Rlenght = map(RsoundLevel_f, 0, maxLevel, 0, HALF_LED);
+    Llenght = map(LsoundLevel_f, 0, maxLevel, 0, HALF_LED);
 
-    Rlenght = constrain(Rlenght, 0, MAX_CH);
-    Llenght = constrain(Llenght, 0, MAX_CH);
+    Rlenght = constrain(Rlenght, 0, HALF_LED);
+    Llenght = constrain(Llenght, 0, HALF_LED);
   }
+}
+
+void updateLowPass() {
+  int maxNoiseLevel = 0;                          
+  int noiseLevel = 0;
+
+  for (byte i = 0; i < 200; i++) {
+    noiseLevel = analogRead(soundRList[portAux]);        
+    if (noiseLevel > maxNoiseLevel) maxNoiseLevel = noiseLevel;                                                
+  }
+  lowPassVolume = maxNoiseLevel + addNoiseLowPassVolume;
+
+  maxNoiseLevel = 0;
+  for (byte i = 0; i < 100; i++) {
+    ADC_FFT();
+
+    for (byte j = 2; j < 32; j++) 
+      if (spectr[j] > maxNoiseLevel
+      ) 
+        maxNoiseLevel = noiseLevel;
+  }
+  lowPassSpectr = maxNoiseLevel + addNoiseLowPassSpectr;
 }
